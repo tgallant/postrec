@@ -14,6 +14,6 @@ exec ros -Q -- $0 "$@"
 
 (defun main (&rest argv)
   (declare (ignorable argv))
-  (postrec::run-cli argv)
+  (postrec::cli/run argv)
   (terpri))
 ;;; vim: set ft=lisp lisp:

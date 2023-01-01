@@ -2,7 +2,7 @@
 
 (in-package :cl-user)
 (defpackage postrec-tests
-  (:use :cl :postrec :fiveam))
+  (:use :cl :postrec :fiveam :cl-mock))
 
 (in-package :postrec-tests)
 
@@ -11,20 +11,27 @@
 
 (in-suite db-tests)
 
-(defun with-temp-db (fn)
-  (uiop:call-with-temporary-file
-   fn :want-pathname-p t :want-stream-p nil :type "db"))
+(defmacro with-test-env (&body body)
+  `(uiop:call-with-temporary-file
+    (lambda (db)
+        (with-mocks ()
+          (answer (clingon.utils::exit 0) nil)
+          ,@body))
+    :want-pathname-p t
+    :want-stream-p nil
+    :type "db"))
 
-(defun make-mock-repo ()
-  (make-instance 'postrec::repo
-                 :name "test repo"
-                 :path "/var/postrec/test_repo"))
+(defmacro capture-output (&body body)
+ `(with-output-to-string (*STANDARD-OUTPUT*)
+    ,@body))
 
-(test create-repos-table
-  (with-temp-db
-      (lambda (db)
-        (postrec::create-repos-table db)
-        (postrec::update db (make-mock-repo))
-        (is (= 1 (length (postrec::repos db)))))))
+(defun test-cli (cmd test-fn)
+  (is-every))
 
-;; (run! 'db-tests)
+(test create-repo
+  (let ((output (with-test-env
+                  (postrec::cli/run `( "-d" ,db "create" "repo" "-n" "t1" "-p" "/tmp/t1"))
+                  (is (= 1 (length (postrec::repos db)))))))
+    (is-true (search "t1 /tmp/t1" output))))
+
+(run! 'db-tests)

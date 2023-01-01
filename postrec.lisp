@@ -19,14 +19,17 @@
 
 ;;;; database helpers
 
-(defun with-db (fn &key db-path &allow-other-keys)
-  "Get or create a db connection and pass it into fn."
-  (clsql:with-database (db (list db-path)
-                        :database-type :sqlite3)
-    (apply fn (list db))))
-
 (defun create-db-table (db vc)
   (clsql:create-view-from-class vc :database db))
+
+(defun ensure-db-setup (db)
+  (if (not (clsql:table-exists-p "REPO" :database db))
+      (create-db-table db 'repo)))
+
+(defmacro with-db (db-path &body body)
+  `(clsql:with-database (db (list ,db-path) :database-type :sqlite3)
+     (ensure-db-setup db)
+     ,@body))
 
 (defun update-instance (db i)
   (clsql:update-records-from-instance i :database db))
@@ -34,31 +37,75 @@
 (defun select-all (db)
   (clsql:select 'repo :database db :flatp t))
 
-(defun create-repos-table (db)
-  (with-db
-    (lambda (d)
-      (create-db-table d 'repo))
-    :db-path db))
+(defun create-repos-table (db-path)
+  (with-db db-path
+    (create-db-table db 'repo)))
 
-(defun repos (db)
-  (with-db
-    (lambda (d)
-      (select-all d))
-    :db-path db))
+(defun repos (db-path)
+  (with-db db-path
+    (select-all db)))
 
-(defun update (db i)
-  (with-db
-    (lambda (d)
-      (update-instance d i))
-    :db-path db))
+(defun update (db-path i)
+  (with-db db-path
+    (update-instance db i)
+    i))
 
 ;;;; command line interface
+
+(defun format-repo (r)
+  (format t "~A ~A~%" (name r) (path r)))
+
+(defun repo-create/options ()
+  (list
+   (clingon:make-option
+    :string
+    :description "the name of the repo."
+    :short-name #\n
+    :long-name "name"
+    :initial-value "postrec.db"
+    :env-vars '("POSTREC_DB")
+    :key :name)
+   (clingon:make-option
+    :string
+    :description "the path for the repo."
+    :short-name #\p
+    :long-name "path"
+    :initial-value "postrec.db"
+    :env-vars '("POSTREC_DB")
+    :key :path)))
+
+(defun repo-create/handler (cmd)
+  (let ((db (clingon:getopt cmd :db))
+        (name (clingon:getopt cmd :name))
+        (path (clingon:getopt cmd :path)))
+    (format-repo (update db (make-instance 'repo :name name :path path)))))
+
+(defun repos-create/command ()
+  (clingon:make-command
+   :name "repo"
+   :description "create a repo"
+   :options (repo-create/options)
+   :handler #'repo-create/handler))
+
+(defun create/options ())
+
+(defun create/handler (cmd)
+  (clingon:print-usage-and-exit cmd *STANDARD-OUTPUT*))
+
+(defun create/command ()
+  (clingon:make-command
+   :name "create"
+   :description "create a resource"
+   :options (create/options)
+   :handler #'create/handler
+   :sub-commands (list (repos-create/command))))
 
 (defun repos-get/options ())
 
 (defun repos-get/handler (cmd)
-  (loop for repo in (repos)
-        do (format t "~A~%" (name repo))))
+  (let ((db (clingon:getopt cmd :db)))
+    (loop for repo in (repos db)
+          do (format t "~A~%" (name repo)))))
 
 (defun repos-get/command ()
   (clingon:make-command
@@ -84,12 +131,12 @@
   (list
    (clingon:make-option
     :string
-    :description "user to greet"
-    :short-name #\u
-    :long-name "user"
-    :initial-value "stranger"
-    :env-vars '("CLI_USER")
-    :key :user)))
+    :description "the database to use."
+    :short-name #\d
+    :long-name "database"
+    :initial-value "postrec.db"
+    :env-vars '("POSTREC_DB")
+    :key :db)))
 
 (defun cli/handler (cmd)
   (clingon:print-usage-and-exit cmd *STANDARD-OUTPUT*))
@@ -103,7 +150,8 @@
    :authors '("Tim Gallant <me@timgallant.us>")
    :options (cli/options)
    :handler #'cli/handler
-   :sub-commands (list (get/command))))
+   :sub-commands (list (create/command)
+                       (get/command))))
 
-(defun run-cli (argv)
+(defun cli/run (argv)
   (clingon:run (cli/command) argv))
